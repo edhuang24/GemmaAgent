@@ -1,4 +1,5 @@
 from openai import OpenAI
+import json
 
 client = OpenAI(
     base_url="http://localhost:1234/v1",
@@ -15,5 +16,8 @@ response = client.chat.completions.create(
 )
 
 # breakpoint()
+
+# Uncomment below to easily see response object (type ChatCompletion) in readable JSON
+# print(response.model_dump_json(indent=4))
 
 print(response.choices[0].message.content)

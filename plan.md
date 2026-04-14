@@ -16,6 +16,28 @@ Write a minimal Python script that sends a chat completion request to LM Studio'
 
 Pick a document loader strategy for mixed file types, chunk your documents, embed them with a local embedding model (sentence-transformers with `all-MiniLM-L6-v2` — tiny and fast on M1), and store vectors in ChromaDB. You'll have a CLI script that points at a folder and indexes everything.
 
+### What this step does
+
+1. **Load documents** — read files from a folder, handling different formats (PDF, Markdown, plain text, etc.)
+2. **Chunk** — split documents into smaller pieces so the LLM gets focused, relevant context rather than entire files
+3. **Embed** — turn each chunk into a vector using a local embedding model
+4. **Store** — save those vectors + the original text into ChromaDB so we can search them later
+
+### Stack
+
+| Purpose | Library |
+|---|---|
+| Mixed file loading | `unstructured` |
+| Embedding | `sentence-transformers` + `all-MiniLM-L6-v2` |
+| Vector store | `chromadb` |
+| Text splitting | `langchain` (`RecursiveCharacterTextSplitter`) |
+
+### Install dependencies
+
+```bash
+pip install unstructured sentence-transformers chromadb langchain
+```
+
 ---
 
 ## Step 3 — Build the RAG Pipeline (Retrieval Side)
