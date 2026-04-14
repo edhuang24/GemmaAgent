@@ -4,22 +4,26 @@ from pathlib import Path
 # partition auto-detects file type (PDF, TXT, MD, etc.) and extracts text consistently
 from unstructured.partition.auto import partition
 
+# RecursiveCharacterTextSplitter splits on natural boundaries (paragraphs → sentences → words)
+# before falling back to hard character cuts — imported from the standalone text splitters package
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 def load_documents(folder_path: str) -> list[dict]:
     docs = []
 
     # Iterate over every item in the given folder
     for file_path in Path(folder_path).iterdir():
-
         # Skip subdirectories — only process files
         if file_path.is_file():
 
             # partition() handles format detection automatically — same call works for all file types
-            elements = partition(filename=str(file_path))
+            # languages=["eng"] sets English as default — update or remove this if ingesting non-English documents
+            elements = partition(filename=str(file_path), languages=["eng"])
 
             # Each file is returned as a list of elements (paragraphs, titles, etc.)
             # We filter out empty elements and join everything into one string per document
             full_text = "\n".join([el.text for el in elements if el.text])
-            
+
             # Store the text alongside metadata so we know which file each chunk came from later
             docs.append({
                 "text": full_text,
@@ -27,8 +31,36 @@ def load_documents(folder_path: str) -> list[dict]:
             })
     return docs
 
+def chunk_documents(docs: list[dict]) -> list[dict]:
+
+    # chunk_size: max characters per chunk — large enough for context, small enough to stay focused
+    # chunk_overlap: characters shared between adjacent chunks to avoid cutting sentences at boundaries
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+    )
+
+    chunks = []
+    
+    for doc in docs:
+        # Split the full document text into a list of smaller string chunks
+        splits = splitter.split_text(doc["text"])
+
+        for i, split in enumerate(splits):
+            chunks.append({
+                "text": split,
+                # Spread the original metadata forward and add chunk_index so we know
+                # the position of this chunk within its source document
+                "metadata": {**doc["metadata"], "chunk_index": i}
+            })
+    return chunks
+
 if __name__ == "__main__":
     docs = load_documents("docs/")
+
     # Print a summary of each loaded document to verify everything parsed correctly
     for doc in docs:
         print(doc["metadata"]["filename"], "—", len(doc["text"]), "chars")
+        
+    chunks = chunk_documents(docs)
+    print(f"\nTotal chunks: {len(chunks)}")

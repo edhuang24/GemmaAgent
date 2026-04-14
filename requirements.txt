@@ -1,0 +1,6 @@
+openai
+unstructured[pdf]
+sentence-transformers
+chromadb
+langchain
+langchain-text-splitters
