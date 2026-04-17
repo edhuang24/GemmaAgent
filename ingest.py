@@ -62,13 +62,21 @@ def chunk_documents(docs: list[dict]) -> list[dict]:
             })
     return chunks
 
-# Embeds all chunks using the local model and stores them in ChromaDB for later retrieval
-def embed_and_store(chunks: list[dict], collection_name: str = "knowledge_base"):
+# Converts chunk text into vectors using the local embedding model
+def embed_chunks(chunks: list[dict]) -> list[list[float]]:
     # Load the embedding model — runs locally on CPU/MPS, no API needed
     model = SentenceTransformer("all-MiniLM-L6-v2")
+    # Extract just the text from each chunk to pass to the model
+    texts = [chunk["text"] for chunk in chunks]
+    # Embed all chunks in one batch — much faster than one at a time
+    # .tolist() converts numpy arrays to plain Python lists for ChromaDB compatibility
+    return model.encode(texts, show_progress_bar=True).tolist()
 
+# Stores pre-computed embeddings and their source chunks into ChromaDB
+def store_chunks(chunks: list[dict], embeddings: list[list[float]], collection_name: str = "knowledge_base"):
     # Initialize a persistent ChromaDB client — stores the index to disk at ./chroma_db
     client = chromadb.PersistentClient(path="./chroma_db")
+    # Get the collection if it exists, or create it if this is the first run
     collection = client.get_or_create_collection(collection_name)
 
     # Extract parallel lists — ChromaDB requires ids, documents, embeddings, and metadatas
@@ -77,9 +85,6 @@ def embed_and_store(chunks: list[dict], collection_name: str = "knowledge_base")
     metadatas = [chunk["metadata"] for chunk in chunks]
     # Build a unique ID per chunk using filename + chunk index to avoid collisions
     ids = [f"{chunk['metadata']['filename']}_{chunk['metadata']['chunk_index']}" for chunk in chunks]
-
-    # Embed all chunks in one batch — much faster than one at a time
-    embeddings = model.encode(texts, show_progress_bar=True).tolist()
 
     # Store everything in ChromaDB — documents lets us retrieve the original text at query time
     collection.add(
@@ -91,13 +96,17 @@ def embed_and_store(chunks: list[dict], collection_name: str = "knowledge_base")
     print(f"\nStored {len(chunks)} chunks in ChromaDB collection '{collection_name}'")
 
 if __name__ == "__main__":
+    # Load raw documents from the docs/ folder
     docs = load_documents("docs/")
 
     # Print a summary of each loaded document to verify everything parsed correctly
     for doc in docs:
         print(doc["metadata"]["filename"], "—", len(doc["text"]), "chars")
-        
+
+    # Split documents into chunks
     chunks = chunk_documents(docs)
     print(f"\nTotal chunks: {len(chunks)}")
 
-    embed_and_store(chunks)
+    # Embed chunks and store them in ChromaDB as two explicit steps
+    embeddings = embed_chunks(chunks)
+    store_chunks(chunks, embeddings)
