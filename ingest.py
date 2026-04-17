@@ -8,6 +8,11 @@ from unstructured.partition.auto import partition
 # before falling back to hard character cuts — imported from the standalone text splitters package
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+# SentenceTransformer runs the embedding model locally — no external API calls
+from sentence_transformers import SentenceTransformer
+# chromadb is our local vector store — persists embeddings to disk for reuse
+import chromadb
+
 def load_documents(folder_path: str) -> list[dict]:
     docs = []
 
@@ -55,6 +60,33 @@ def chunk_documents(docs: list[dict]) -> list[dict]:
             })
     return chunks
 
+def embed_and_store(chunks: list[dict], collection_name: str = "knowledge_base"):
+    # Load the embedding model — runs locally on CPU/MPS, no API needed
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+
+    # Initialize a persistent ChromaDB client — stores the index to disk at ./chroma_db
+    client = chromadb.PersistentClient(path="./chroma_db")
+    collection = client.get_or_create_collection(collection_name)
+
+    # Extract parallel lists — ChromaDB requires ids, documents, embeddings, and metadatas
+    # to be passed as separate lists of the same length
+    texts = [chunk["text"] for chunk in chunks]
+    metadatas = [chunk["metadata"] for chunk in chunks]
+    # Build a unique ID per chunk using filename + chunk index to avoid collisions
+    ids = [f"{chunk['metadata']['filename']}_{chunk['metadata']['chunk_index']}" for chunk in chunks]
+
+    # Embed all chunks in one batch — much faster than one at a time
+    embeddings = model.encode(texts, show_progress_bar=True).tolist()
+
+    # Store everything in ChromaDB — documents lets us retrieve the original text at query time
+    collection.add(
+        ids=ids,
+        documents=texts,
+        embeddings=embeddings,
+        metadatas=metadatas,
+    )
+    print(f"\nStored {len(chunks)} chunks in ChromaDB collection '{collection_name}'")
+
 if __name__ == "__main__":
     docs = load_documents("docs/")
 
@@ -64,3 +96,5 @@ if __name__ == "__main__":
         
     chunks = chunk_documents(docs)
     print(f"\nTotal chunks: {len(chunks)}")
+
+    embed_and_store(chunks)
