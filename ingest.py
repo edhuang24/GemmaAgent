@@ -13,6 +13,7 @@ from sentence_transformers import SentenceTransformer
 # chromadb is our local vector store — persists embeddings to disk for reuse
 import chromadb
 
+# Walks a folder and loads all files into a list of dicts with text and metadata
 def load_documents(folder_path: str) -> list[dict]:
     docs = []
 
@@ -36,6 +37,7 @@ def load_documents(folder_path: str) -> list[dict]:
             })
     return docs
 
+# Splits each document's text into smaller overlapping chunks for more precise retrieval
 def chunk_documents(docs: list[dict]) -> list[dict]:
 
     # chunk_size: max characters per chunk — large enough for context, small enough to stay focused
@@ -60,6 +62,7 @@ def chunk_documents(docs: list[dict]) -> list[dict]:
             })
     return chunks
 
+# Embeds all chunks using the local model and stores them in ChromaDB for later retrieval
 def embed_and_store(chunks: list[dict], collection_name: str = "knowledge_base"):
     # Load the embedding model — runs locally on CPU/MPS, no API needed
     model = SentenceTransformer("all-MiniLM-L6-v2")
