@@ -166,26 +166,53 @@ if tool_calls:
             "content": tool_result,
         })
 
-    # Send the full message history back to get Gemma's final answer
+    # Send the full message history back and stream the final answer
     # Higher max_tokens gives the model enough room to summarize the tool results
-    final_response = client.chat.completions.create(
+    final_stream = client.chat.completions.create(
         model="gemma",
         tools=tools,
         max_tokens=2560,
+        stream=True,
         messages=messages,
     )
 
-    final_message = final_response.choices[0].message
+    print("\n--- Reasoning ---")
+
+    # Accumulate tool calls and content from the final stream
+    final_tool_calls = []
+    final_content = ""
+
+    # Iterate over the final stream, printing reasoning and content as they arrive
+    for chunk in final_stream:
+        delta = chunk.choices[0].delta
+
+        # Print reasoning tokens in real time as they stream in
+        if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+            print(delta.reasoning_content, end="", flush=True)
+
+        # Accumulate plain text content for the final answer
+        if delta.content:
+            final_content += delta.content
+
+        # Accumulate any tool calls in case the model wants another tool
+        if delta.tool_calls:
+            for tc in delta.tool_calls:
+                if tc.index >= len(final_tool_calls):
+                    final_tool_calls.append({"name": "", "arguments": ""})
+                if tc.function.name:
+                    final_tool_calls[tc.index]["name"] += tc.function.name
+                if tc.function.arguments:
+                    final_tool_calls[tc.index]["arguments"] += tc.function.arguments
 
     # Check if the model wants to call another tool instead of giving a final answer
     # This is normal ReAct behavior — the full agent loop in agent.py will handle this properly
-    if final_message.tool_calls:
-        print("\n--- Model wants to call another tool (needs more iterations) ---")
-        for tc in final_message.tool_calls:
-            print(f"Tool:      {tc.function.name}")
-            print(f"Arguments: {tc.function.arguments}")
+    if final_tool_calls:
+        print("\n\n--- Model wants to call another tool (needs more iterations) ---")
+        for tc in final_tool_calls:
+            print(f"Tool:      {tc['name']}")
+            print(f"Arguments: {tc['arguments']}")
     else:
-        print(f"\n--- Final Answer ---\n{final_message.content}")
+        print(f"\n\n--- Final Answer ---\n{final_content}")
 
 else:
     # Model chose to answer directly without calling a tool
