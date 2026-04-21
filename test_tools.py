@@ -38,10 +38,30 @@ TOOL_REGISTRY = {
 }
 
 # The query you want to test — swap this out to try different tools
-query = "What's the weather in San Francisco like today?"
+query = "What happened with the Iran War today?"
 
-# Build the initial message history with just the user's query
-messages = [{"role": "user", "content": query}]
+# Cap how many tool calls we execute in this test — prevents runaway multi-call responses
+MAX_TOOL_CALLS = 5
+
+# System prompt instructs Gemma to call only one tool at a time — prevents the multi-call runaway we saw earlier
+SYSTEM_PROMPT = """You are a helpful AI assistant with access to tools.
+
+Use tools when you need to look something up, read a file, search the web, or run a command.
+Only call one tool at a time.
+Once you have enough information to answer the user's question, stop calling tools and give a final answer.
+Do not call the same tool with the same arguments twice."""
+
+# Build the initial message history with the system prompt and the user's query
+messages = [
+    {"role": "system", "content": SYSTEM_PROMPT},
+    {"role": "user", "content": query},
+]
+
+# DEBUG: print the full payload being sent to the LLM, then pause before firing the request
+import json
+print("\n--- DEBUG: Outgoing Payload ---")
+print(json.dumps(messages, indent=2))
+input("Press Enter to send to LLM...")
 
 # stream=True returns an iterator of chunks instead of waiting for the full response
 stream = client.chat.completions.create(
@@ -93,15 +113,25 @@ for chunk in stream:
             if tc.function.arguments:
                 tool_calls[tc.index]["arguments"] += tc.function.arguments
 
+# DEBUG: print the full message history after the stream, including Gemma's assembled response
+# print("\n--- DEBUG: Message History After Stream ---")
+# print(json.dumps(messages, indent=2))
+# input("Press Enter to continue...")
+
 print("\n\n--- Tool Call ---")
 
 if tool_calls:
-    for tc in tool_calls:
+    # Limit to MAX_TOOL_CALLS — Gemma often generates more than needed despite the system prompt
+    capped_tool_calls = tool_calls[:MAX_TOOL_CALLS]
+    if len(tool_calls) > MAX_TOOL_CALLS:
+        print(f"(Capping to {MAX_TOOL_CALLS} tool call(s) — model generated {len(tool_calls)} total)")
+
+    for tc in capped_tool_calls:
         print(f"Tool:      {tc['name']}")
         print(f"Arguments: {tc['arguments']}")
 
     # Append Gemma's tool call response to history so the next call has full context
-    # The API expects the assistant message to include the tool_calls list
+    # The API expects the assistant message to include the full list of tool calls it generated
     messages.append({
         "role": "assistant",
         "content": None,
@@ -111,18 +141,22 @@ if tool_calls:
                 "type": "function",
                 "function": {"name": tc["name"], "arguments": tc["arguments"]},
             }
-            for tc in tool_calls
+            for tc in capped_tool_calls
         ],
     })
 
-    # Execute each tool and append its result to the message history
-    for tc in tool_calls:
+    # Execute each capped tool call and append its result to the message history
+    for tc in capped_tool_calls:
+        # Guard against truncated tool calls — max_tokens can cut off arguments mid-generation
+        if not tc["arguments"].strip():
+            print(f"\nSkipping {tc['name']} — arguments were truncated (hit max_tokens limit)")
+            continue
         # Parse the JSON argument string into a dict so we can call the function
         tool_args = json.loads(tc["arguments"])
         # Look up the function in the registry and call it with the parsed args
         tool_result = TOOL_REGISTRY[tc["name"]](**tool_args)
 
-        print(f"\n--- Tool Result (preview) ---\n{tool_result[:300]}")
+        print(f"\n--- Tool Result (preview) ---\n{tool_result[:1000]}")
 
         # Append the tool result with role "tool" — the API requires this format
         # tool_call_id links this result back to the specific tool call that triggered it
@@ -133,14 +167,25 @@ if tool_calls:
         })
 
     # Send the full message history back to get Gemma's final answer
+    # Higher max_tokens gives the model enough room to summarize the tool results
     final_response = client.chat.completions.create(
         model="gemma",
         tools=tools,
-        max_tokens=512,
+        max_tokens=2560,
         messages=messages,
     )
 
-    print(f"\n--- Final Answer ---\n{final_response.choices[0].message.content}")
+    final_message = final_response.choices[0].message
+
+    # Check if the model wants to call another tool instead of giving a final answer
+    # This is normal ReAct behavior — the full agent loop in agent.py will handle this properly
+    if final_message.tool_calls:
+        print("\n--- Model wants to call another tool (needs more iterations) ---")
+        for tc in final_message.tool_calls:
+            print(f"Tool:      {tc.function.name}")
+            print(f"Arguments: {tc.function.arguments}")
+    else:
+        print(f"\n--- Final Answer ---\n{final_message.content}")
 
 else:
     # Model chose to answer directly without calling a tool
