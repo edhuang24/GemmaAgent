@@ -86,10 +86,19 @@ def run_agent(query: str, max_iterations: int = 10, max_tool_calls: int = 5) -> 
 
         # If Gemma returned a tool call, execute it and feed the result back
         if message.tool_calls:
-            # Stop executing tools if we've hit the cap — force a final answer next iteration
+            # If we've hit the tool call cap, force a final answer by setting tool_choice="none"
+            # "none" prevents the model from generating any tool calls — it must produce plain text
             if tool_call_count >= max_tool_calls:
-                print(f"Max tool calls ({max_tool_calls}) reached — stopping tool execution.")
-                return "Max tool calls reached without a final answer."
+                print(f"Max tool calls ({max_tool_calls}) reached — forcing final answer.")
+                final = client.chat.completions.create(
+                    model="gemma",
+                    # "none" forces a text-only response — no tool calls allowed
+                    tool_choice="none",
+                    tools=TOOLS,
+                    max_tokens=2560,
+                    messages=messages,
+                )
+                return final.choices[0].message.content
 
             # Only use the first tool call — prevents runaway multi-call responses
             tool_call = message.tool_calls[0]
